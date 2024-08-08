@@ -1,9 +1,10 @@
 import os
 import requests
 from icalendar import Calendar
-from notion_client import Client
+from notion_client import Client, APIResponseError
 from datetime import datetime
 import time
+import hashlib
 
 # Environment variables
 NOTION_TOKEN = os.environ.get("NOTION_TOKEN")
@@ -15,7 +16,16 @@ notion = Client(auth=NOTION_TOKEN)
 
 def fetch_ical_data(url):
     response = requests.get(url)
-    return Calendar.from_ical(response.text)
+    return response.text
+
+def calculate_hash(data):
+    return hashlib.md5(data.encode()).hexdigest()
+
+def process_calendar(cal_data):
+    cal = Calendar.from_ical(cal_data)
+    for component in cal.walk():
+        if component.name == "VEVENT":
+            create_or_update_notion_page(component)
 
 def create_or_update_notion_page(event):
     query = notion.databases.query(
@@ -28,53 +38,49 @@ def create_or_update_notion_page(event):
         }
     )
 
+    properties = {
+        "Name": {"title": [{"text": {"content": event.get('summary')}}]},
+        "Date": {"date": {"start": event.get('dtstart').dt.isoformat()}},
+    }
+    
+    # Only add Description if it exists in the event
+    if 'description' in event:
+        properties["Notes"] = {"rich_text": [{"text": {"content": event.get('description', '')}}]}
+
     if query['results']:
         page_id = query['results'][0]['id']
-        notion.pages.update(
-            page_id=page_id,
-            properties={
-                "Date": {"date": {"start": event.get('dtstart').dt.isoformat()}},
-                "Description": {"rich_text": [{"text": {"content": event.get('description', '')}}]}
-            }
-        )
+        notion.pages.update(page_id=page_id, properties=properties)
         print(f"Updated event: {event.get('summary')}")
     else:
-        notion.pages.create(
-            parent={"database_id": NOTION_DATABASE_ID},
-            properties={
-                "Name": {"title": [{"text": {"content": event.get('summary')}}]},
-                "Date": {"date": {"start": event.get('dtstart').dt.isoformat()}},
-                "Description": {"rich_text": [{"text": {"content": event.get('description', '')}}]}
-            }
-        )
+        notion.pages.create(parent={"database_id": NOTION_DATABASE_ID}, properties=properties)
         print(f"Created new event: {event.get('summary')}")
 
 def main():
-    last_sync_time = None
+    last_hash = None
     while True:
-        current_time = datetime.now()
-        print(f"Starting sync at {current_time}")
-        
         try:
-            cal = fetch_ical_data(ICAL_URL)
+            print(f"Checking for changes at {datetime.now()}")
+            cal_data = fetch_ical_data(ICAL_URL)
+            current_hash = calculate_hash(cal_data)
             
-            for component in cal.walk():
-                if component.name == "VEVENT":
-                    # Only process events that have been updated since the last sync
-                    last_modified = component.get('last-modified', component.get('dtstamp'))
-                    if last_sync_time is None or last_modified.dt > last_sync_time:
-                        create_or_update_notion_page(component)
+            if current_hash != last_hash:
+                print("Changes detected, processing updates...")
+                process_calendar(cal_data)
+                last_hash = current_hash
+            else:
+                print("No changes detected")
             
-            last_sync_time = current_time
-            print(f"Sync completed at {datetime.now()}")
+            # Wait for a short time before checking again
+            time.sleep(10)
         except requests.exceptions.RequestException as e:
-            print(f"Network error during sync: {str(e)}")
-        except notion_client.errors.APIResponseError as e:
+            print(f"Network error: {str(e)}")
+        except APIResponseError as e:
             print(f"Notion API error: {str(e)}")
         except Exception as e:
-            print(f"Unexpected error during sync: {str(e)}")
+            print(f"Unexpected error: {str(e)}")
         
-        time.sleep(3)  # Wait for 3 seconds before the next sync
+        # Wait before retrying after an error
+        time.sleep(60)
 
 if __name__ == "__main__":
     main()
