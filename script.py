@@ -5,6 +5,7 @@ from notion_client import Client, APIResponseError
 from datetime import datetime
 import time
 import hashlib
+import pprint
 
 # Environment variables
 NOTION_TOKEN = os.environ.get("NOTION_TOKEN")
@@ -21,10 +22,24 @@ def fetch_ical_data(url):
 def calculate_hash(data):
     return hashlib.md5(data.encode()).hexdigest()
 
+def debug_print_event_properties(event):
+    print("\n--- Event Properties ---")
+    for key, value in event.items():
+        if key == 'DESCRIPTION':
+            print(f"{key}: [Description text truncated for brevity]")
+        elif isinstance(value, list) and len(value) > 0 and hasattr(value[0], 'to_ical'):
+            print(f"{key}: {[v.to_ical().decode('utf-8') for v in value]}")
+        elif hasattr(value, 'to_ical'):
+            print(f"{key}: {value.to_ical().decode('utf-8')}")
+        else:
+            print(f"{key}: {value}")
+    print("------------------------\n")
+
 def process_calendar(cal_data):
     cal = Calendar.from_ical(cal_data)
     for component in cal.walk():
         if component.name == "VEVENT":
+            debug_print_event_properties(component)
             create_or_update_notion_page(component)
 
 def create_or_update_notion_page(event):
@@ -43,9 +58,9 @@ def create_or_update_notion_page(event):
         "Date": {"date": {"start": event.get('dtstart').dt.isoformat()}},
     }
     
-    # Only add Description if it exists in the event
-    if 'description' in event:
-        properties["Notes"] = {"rich_text": [{"text": {"content": event.get('description', '')}}]}
+    # We'll keep this for now, but it might change based on what we find
+    if 'categories' in event:
+        properties["Tags"] = {"multi_select": [{"name": tag} for tag in event.get('categories', [])]}
 
     if query['results']:
         page_id = query['results'][0]['id']
