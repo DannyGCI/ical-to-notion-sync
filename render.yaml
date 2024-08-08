@@ -1,11 +1,3 @@
-services:
-  - type: web
-    name: notion-calendar-sync
-    env: python
-    buildCommand: pip install -r requirements.txt
-    startCommand: gunicorn main:app
-    envVars:
-      - key: NOTION_API_KEY
-        sync: false
-      - key: NOTION_DATABASE_ID
-        sync: false
+requests==2.26.0
+icalendar==4.0.7
+notion-client==1.0.0
