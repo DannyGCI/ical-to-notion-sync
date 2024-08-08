@@ -5,7 +5,6 @@ from notion_client import Client, APIResponseError
 from datetime import datetime
 import time
 import hashlib
-import pprint
 
 # Environment variables
 NOTION_TOKEN = os.environ.get("NOTION_TOKEN")
@@ -22,24 +21,10 @@ def fetch_ical_data(url):
 def calculate_hash(data):
     return hashlib.md5(data.encode()).hexdigest()
 
-def debug_print_event_properties(event):
-    print("\n--- Event Properties ---")
-    for key, value in event.items():
-        if key == 'DESCRIPTION':
-            print(f"{key}: [Description text truncated for brevity]")
-        elif isinstance(value, list) and len(value) > 0 and hasattr(value[0], 'to_ical'):
-            print(f"{key}: {[v.to_ical().decode('utf-8') for v in value]}")
-        elif hasattr(value, 'to_ical'):
-            print(f"{key}: {value.to_ical().decode('utf-8')}")
-        else:
-            print(f"{key}: {value}")
-    print("------------------------\n")
-
 def process_calendar(cal_data):
     cal = Calendar.from_ical(cal_data)
     for component in cal.walk():
         if component.name == "VEVENT":
-            debug_print_event_properties(component)
             create_or_update_notion_page(component)
 
 def create_or_update_notion_page(event):
@@ -55,12 +40,34 @@ def create_or_update_notion_page(event):
 
     properties = {
         "Name": {"title": [{"text": {"content": event.get('summary')}}]},
-        "Date": {"date": {"start": event.get('dtstart').dt.isoformat()}},
+        "Date": {
+            "date": {
+                "start": event.get('dtstart').dt.isoformat(),
+                "end": event.get('dtend').dt.isoformat() if 'dtend' in event else None
+            }
+        },
+        "Location": {"rich_text": [{"text": {"content": event.get('location', '')}}]},
+        "Description": {"rich_text": [{"text": {"content": event.get('description', '')[:2000]}}]},
+        "Created": {"date": {"start": event.get('created').dt.isoformat() if 'created' in event else None}},
+        "Last Modified": {"date": {"start": event.get('last-modified').dt.isoformat() if 'last-modified' in event else None}},
+        "UID": {"rich_text": [{"text": {"content": event.get('uid', '')}}]},
+        "Status": {"select": {"name": event.get('status', '')}},
     }
-    
-    # We'll keep this for now, but it might change based on what we find
-    if 'categories' in event:
-        properties["Tags"] = {"multi_select": [{"name": tag} for tag in event.get('categories', [])]}
+
+    # Handle attendees
+    if 'attendee' in event:
+        attendees = event.get('attendee')
+        if isinstance(attendees, list):
+            attendees = ', '.join(attendees)
+        properties["Attendees"] = {"rich_text": [{"text": {"content": attendees[:2000]}}]}
+
+    # Handle organizer
+    if 'organizer' in event:
+        properties["Organizer"] = {"rich_text": [{"text": {"content": str(event.get('organizer'))[:2000]}}]}
+
+    # Handle URL
+    if 'url' in event:
+        properties["URL"] = {"url": event.get('url')}
 
     if query['results']:
         page_id = query['results'][0]['id']
