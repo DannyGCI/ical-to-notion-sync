@@ -1,0 +1,4 @@
+Flask==2.3.2
+notion-client==2.0.0
+icalendar==5.0.4
+gunicorn==20.1.0
