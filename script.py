@@ -1,4 +1,5 @@
 import os
+import sys
 import requests
 from icalendar import Calendar
 from notion_client import Client, APIResponseError
@@ -72,37 +73,38 @@ def create_or_update_notion_page(event):
     if query['results']:
         page_id = query['results'][0]['id']
         notion.pages.update(page_id=page_id, properties=properties)
-        print(f"Updated event: {event.get('summary')}")
+        print(f"Updated event: {event.get('summary')}", flush=True)
     else:
         notion.pages.create(parent={"database_id": NOTION_DATABASE_ID}, properties=properties)
-        print(f"Created new event: {event.get('summary')}")
+        print(f"Created new event: {event.get('summary')}", flush=True)
 
 def main():
     last_hash = None
     while True:
         try:
-            print(f"Checking for changes at {datetime.now()}")
+            print(f"Checking for changes at {datetime.now()}", flush=True)
             cal_data = fetch_ical_data(ICAL_URL)
             current_hash = calculate_hash(cal_data)
             
             if current_hash != last_hash:
-                print("Changes detected, processing updates...")
+                print("Changes detected, processing updates...", flush=True)
                 process_calendar(cal_data)
                 last_hash = current_hash
             else:
-                print("No changes detected")
+                print("No changes detected", flush=True)
             
             # Wait for a short time before checking again
             time.sleep(10)
         except requests.exceptions.RequestException as e:
-            print(f"Network error: {str(e)}")
+            print(f"Network error: {str(e)}", flush=True)
         except APIResponseError as e:
-            print(f"Notion API error: {str(e)}")
+            print(f"Notion API error: {str(e)}", flush=True)
         except Exception as e:
-            print(f"Unexpected error: {str(e)}")
+            print(f"Unexpected error: {str(e)}", flush=True)
         
         # Wait before retrying after an error
         time.sleep(60)
 
 if __name__ == "__main__":
+    print("Script started", flush=True)
     main()
