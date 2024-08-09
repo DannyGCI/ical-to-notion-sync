@@ -52,8 +52,12 @@ def create_or_update_notion_page(event):
         "Created": {"date": {"start": event.get('created').dt.isoformat() if 'created' in event else None}},
         "Last Modified": {"date": {"start": event.get('last-modified').dt.isoformat() if 'last-modified' in event else None}},
         "UID": {"rich_text": [{"text": {"content": event.get('uid', '')}}]},
-        "Status": {"select": {"name": event.get('status', '')}},
     }
+
+    # Only add Status if it's not empty
+    status = event.get('status', '').strip()
+    if status:
+        properties["Status"] = {"select": {"name": status}}
 
     # Handle attendees
     if 'attendee' in event:
