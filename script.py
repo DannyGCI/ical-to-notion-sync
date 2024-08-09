@@ -49,10 +49,16 @@ def create_or_update_notion_page(event):
         },
         "Location": {"rich_text": [{"text": {"content": event.get('location', '')}}]},
         "Description": {"rich_text": [{"text": {"content": event.get('description', '')[:2000]}}]},
-        "Created": {"date": {"start": event.get('created').dt.isoformat() if 'created' in event else None}},
-        "Last Modified": {"date": {"start": event.get('last-modified').dt.isoformat() if 'last-modified' in event else None}},
         "UID": {"rich_text": [{"text": {"content": event.get('uid', '')}}]},
     }
+
+    # Handle Created date
+    if 'created' in event and event['created'].dt:
+        properties["Created"] = {"date": {"start": event['created'].dt.isoformat()}}
+
+    # Handle Last Modified date
+    if 'last-modified' in event and event['last-modified'].dt:
+        properties["Last Modified"] = {"date": {"start": event['last-modified'].dt.isoformat()}}
 
     # Only add Status if it's not empty
     status = event.get('status', '').strip()
