@@ -52,6 +52,13 @@ def fetch_notion_events():
         start_cursor = response['next_cursor']
     return events
 
+def delete_notion_page(page_id):
+    try:
+        notion.pages.update(page_id=page_id, archived=True)
+        print(f"Deleted event with ID: {page_id}", flush=True)
+    except APIResponseError as e:
+        print(f"Error deleting Notion page {page_id}: {str(e)}", flush=True)
+
 def process_calendar(cal_data):
     cal = Calendar.from_ical(cal_data)
     ical_events = set()
@@ -73,7 +80,9 @@ def process_calendar(cal_data):
         if notion_uid and notion_uid not in ical_events:
             delete_notion_page(event['id'])
 
-# ... (rest of the code remains the same)
+def create_or_update_notion_page(event):
+    # ... (rest of the function remains the same)
+    pass  # Remove this line when you uncomment the function body
 
 def main():
     last_hash = None
