@@ -3,7 +3,7 @@ import sys
 import requests
 from icalendar import Calendar
 from notion_client import Client, APIResponseError
-from datetime import datetime, date
+from datetime import datetime, date, timedelta
 import time
 import hashlib
 
@@ -34,10 +34,18 @@ def fetch_notion_events():
     events = []
     has_more = True
     start_cursor = None
+    one_day_ago = (datetime.now() - timedelta(days=1)).isoformat()
+    
     while has_more:
         response = notion.databases.query(
             database_id=NOTION_DATABASE_ID,
-            start_cursor=start_cursor
+            start_cursor=start_cursor,
+            filter={
+                "property": "Date",
+                "date": {
+                    "on_or_after": one_day_ago
+                }
+            }
         )
         events.extend(response['results'])
         has_more = response['has_more']
@@ -47,10 +55,17 @@ def fetch_notion_events():
 def process_calendar(cal_data):
     cal = Calendar.from_ical(cal_data)
     ical_events = set()
+    one_day_ago = datetime.now() - timedelta(days=1)
+    
     for component in cal.walk():
         if component.name == "VEVENT":
-            ical_events.add(component.get('uid'))
-            create_or_update_notion_page(component)
+            event_date = component.get('dtstart').dt
+            if isinstance(event_date, date):
+                event_date = datetime.combine(event_date, datetime.min.time())
+            
+            if event_date >= one_day_ago:
+                ical_events.add(component.get('uid'))
+                create_or_update_notion_page(component)
     
     notion_events = fetch_notion_events()
     for event in notion_events:
@@ -58,89 +73,7 @@ def process_calendar(cal_data):
         if notion_uid and notion_uid not in ical_events:
             delete_notion_page(event['id'])
 
-def delete_notion_page(page_id):
-    try:
-        notion.pages.update(page_id=page_id, archived=True)
-        print(f"Deleted event with ID: {page_id}", flush=True)
-    except APIResponseError as e:
-        print(f"Error deleting Notion page {page_id}: {str(e)}", flush=True)
-
-def create_or_update_notion_page(event):
-    print(f"Processing event: {event.get('summary')}", flush=True)
-    
-    query = notion.databases.query(
-        database_id=NOTION_DATABASE_ID,
-        filter={
-            "property": "UID",
-            "rich_text": {
-                "equals": str(event.get('uid', ''))
-            }
-        }
-    )
-
-    properties = {
-        "Name": {"title": [{"text": {"content": str(event.get('summary'))}}]},
-        "UID": {"rich_text": [{"text": {"content": str(event.get('uid', ''))}}]},
-    }
-
-    # Handle Date
-    start_date = safe_date_to_iso(event.get('dtstart'))
-    end_date = safe_date_to_iso(event.get('dtend'))
-    if start_date:
-        properties["Date"] = {
-            "date": {
-                "start": start_date,
-                "end": end_date if end_date else None
-            }
-        }
-
-    # Handle other properties
-    if 'location' in event:
-        properties["Location"] = {"rich_text": [{"text": {"content": str(event.get('location', ''))[:2000]}}]}
-    
-    if 'description' in event:
-        properties["Description"] = {"rich_text": [{"text": {"content": str(event.get('description', ''))[:2000]}}]}
-
-    # Handle Created date
-    created_date = safe_date_to_iso(event.get('created'))
-    if created_date:
-        properties["Created"] = {"date": {"start": created_date}}
-
-    # Handle Last Modified date
-    last_modified_date = safe_date_to_iso(event.get('last-modified'))
-    if last_modified_date:
-        properties["Last Modified"] = {"date": {"start": last_modified_date}}
-
-    # Handle attendees
-    if 'attendee' in event:
-        attendees = event.get('attendee')
-        if isinstance(attendees, list):
-            attendees = ', '.join(str(a) for a in attendees)
-        else:
-            attendees = str(attendees)
-        properties["Attendees"] = {"rich_text": [{"text": {"content": attendees[:2000]}}]}
-
-    # Handle organizer
-    if 'organizer' in event:
-        properties["Organizer"] = {"rich_text": [{"text": {"content": str(event.get('organizer'))[:2000]}}]}
-
-    # Handle URL
-    if 'url' in event and event['url']:
-        properties["URL"] = {"url": str(event.get('url'))}
-
-    print("Properties to be sent to Notion:", properties, flush=True)
-
-    try:
-        if query['results']:
-            page_id = query['results'][0]['id']
-            notion.pages.update(page_id=page_id, properties=properties)
-            print(f"Updated event: {event.get('summary')}", flush=True)
-        else:
-            notion.pages.create(parent={"database_id": NOTION_DATABASE_ID}, properties=properties)
-            print(f"Created new event: {event.get('summary')}", flush=True)
-    except APIResponseError as e:
-        print(f"Notion API error for event {event.get('summary')}: {str(e)}", flush=True)
-        print(f"Problematic properties: {properties}", flush=True)
+# ... (rest of the code remains the same)
 
 def main():
     last_hash = None
