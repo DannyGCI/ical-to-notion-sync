@@ -3,7 +3,7 @@ import sys
 import requests
 from icalendar import Calendar
 from notion_client import Client, APIResponseError
-from datetime import datetime
+from datetime import datetime, date
 import time
 import hashlib
 
@@ -22,12 +22,6 @@ def fetch_ical_data(url):
 def calculate_hash(data):
     return hashlib.md5(data.encode()).hexdigest()
 
-def process_calendar(cal_data):
-    cal = Calendar.from_ical(cal_data)
-    for component in cal.walk():
-        if component.name == "VEVENT":
-            create_or_update_notion_page(component)
-
 def safe_date_to_iso(date_value):
     if hasattr(date_value, 'dt'):
         if isinstance(date_value.dt, datetime):
@@ -35,6 +29,12 @@ def safe_date_to_iso(date_value):
         elif isinstance(date_value.dt, date):
             return date_value.dt.isoformat()
     return None
+
+def process_calendar(cal_data):
+    cal = Calendar.from_ical(cal_data)
+    for component in cal.walk():
+        if component.name == "VEVENT":
+            create_or_update_notion_page(component)
 
 def create_or_update_notion_page(event):
     print(f"Processing event: {event.get('summary')}", flush=True)
@@ -50,8 +50,8 @@ def create_or_update_notion_page(event):
     )
 
     properties = {
-        "Name": {"title": [{"text": {"content": event.get('summary')}}]},
-        "UID": {"rich_text": [{"text": {"content": event.get('uid', '')}}]},
+        "Name": {"title": [{"text": {"content": str(event.get('summary'))}}]},
+        "UID": {"rich_text": [{"text": {"content": str(event.get('uid', ''))}}]},
     }
 
     # Handle Date
@@ -82,11 +82,6 @@ def create_or_update_notion_page(event):
     if last_modified_date:
         properties["Last Modified"] = {"date": {"start": last_modified_date}}
 
-    # Only add Status if it's not empty
-    status = event.get('status', '').strip()
-    if status:
-        properties["Status"] = {"select": {"name": status}}
-
     # Handle attendees
     if 'attendee' in event:
         attendees = event.get('attendee')
@@ -101,7 +96,7 @@ def create_or_update_notion_page(event):
         properties["Organizer"] = {"rich_text": [{"text": {"content": str(event.get('organizer'))[:2000]}}]}
 
     # Handle URL
-    if 'url' in event:
+    if 'url' in event and event['url']:
         properties["URL"] = {"url": str(event.get('url'))}
 
     print("Properties to be sent to Notion:", properties, flush=True)
