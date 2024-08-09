@@ -28,7 +28,17 @@ def process_calendar(cal_data):
         if component.name == "VEVENT":
             create_or_update_notion_page(component)
 
+def safe_date_to_iso(date_value):
+    if hasattr(date_value, 'dt'):
+        if isinstance(date_value.dt, datetime):
+            return date_value.dt.isoformat()
+        elif isinstance(date_value.dt, date):
+            return date_value.dt.isoformat()
+    return None
+
 def create_or_update_notion_page(event):
+    print(f"Processing event: {event.get('summary')}", flush=True)
+    
     query = notion.databases.query(
         database_id=NOTION_DATABASE_ID,
         filter={
@@ -41,24 +51,36 @@ def create_or_update_notion_page(event):
 
     properties = {
         "Name": {"title": [{"text": {"content": event.get('summary')}}]},
-        "Date": {
-            "date": {
-                "start": event.get('dtstart').dt.isoformat(),
-                "end": event.get('dtend').dt.isoformat() if 'dtend' in event else None
-            }
-        },
-        "Location": {"rich_text": [{"text": {"content": event.get('location', '')}}]},
-        "Description": {"rich_text": [{"text": {"content": event.get('description', '')[:2000]}}]},
         "UID": {"rich_text": [{"text": {"content": event.get('uid', '')}}]},
     }
 
+    # Handle Date
+    start_date = safe_date_to_iso(event.get('dtstart'))
+    end_date = safe_date_to_iso(event.get('dtend'))
+    if start_date:
+        properties["Date"] = {
+            "date": {
+                "start": start_date,
+                "end": end_date if end_date else None
+            }
+        }
+
+    # Handle other properties
+    if 'location' in event:
+        properties["Location"] = {"rich_text": [{"text": {"content": str(event.get('location', ''))[:2000]}}]}
+    
+    if 'description' in event:
+        properties["Description"] = {"rich_text": [{"text": {"content": str(event.get('description', ''))[:2000]}}]}
+
     # Handle Created date
-    if 'created' in event and event['created'].dt:
-        properties["Created"] = {"date": {"start": event['created'].dt.isoformat()}}
+    created_date = safe_date_to_iso(event.get('created'))
+    if created_date:
+        properties["Created"] = {"date": {"start": created_date}}
 
     # Handle Last Modified date
-    if 'last-modified' in event and event['last-modified'].dt:
-        properties["Last Modified"] = {"date": {"start": event['last-modified'].dt.isoformat()}}
+    last_modified_date = safe_date_to_iso(event.get('last-modified'))
+    if last_modified_date:
+        properties["Last Modified"] = {"date": {"start": last_modified_date}}
 
     # Only add Status if it's not empty
     status = event.get('status', '').strip()
@@ -69,7 +91,9 @@ def create_or_update_notion_page(event):
     if 'attendee' in event:
         attendees = event.get('attendee')
         if isinstance(attendees, list):
-            attendees = ', '.join(attendees)
+            attendees = ', '.join(str(a) for a in attendees)
+        else:
+            attendees = str(attendees)
         properties["Attendees"] = {"rich_text": [{"text": {"content": attendees[:2000]}}]}
 
     # Handle organizer
@@ -78,15 +102,21 @@ def create_or_update_notion_page(event):
 
     # Handle URL
     if 'url' in event:
-        properties["URL"] = {"url": event.get('url')}
+        properties["URL"] = {"url": str(event.get('url'))}
 
-    if query['results']:
-        page_id = query['results'][0]['id']
-        notion.pages.update(page_id=page_id, properties=properties)
-        print(f"Updated event: {event.get('summary')}", flush=True)
-    else:
-        notion.pages.create(parent={"database_id": NOTION_DATABASE_ID}, properties=properties)
-        print(f"Created new event: {event.get('summary')}", flush=True)
+    print("Properties to be sent to Notion:", properties, flush=True)
+
+    try:
+        if query['results']:
+            page_id = query['results'][0]['id']
+            notion.pages.update(page_id=page_id, properties=properties)
+            print(f"Updated event: {event.get('summary')}", flush=True)
+        else:
+            notion.pages.create(parent={"database_id": NOTION_DATABASE_ID}, properties=properties)
+            print(f"Created new event: {event.get('summary')}", flush=True)
+    except APIResponseError as e:
+        print(f"Notion API error for event {event.get('summary')}: {str(e)}", flush=True)
+        print(f"Problematic properties: {properties}", flush=True)
 
 def main():
     last_hash = None
