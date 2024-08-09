@@ -30,11 +30,40 @@ def safe_date_to_iso(date_value):
             return date_value.dt.isoformat()
     return None
 
+def fetch_notion_events():
+    events = []
+    has_more = True
+    start_cursor = None
+    while has_more:
+        response = notion.databases.query(
+            database_id=NOTION_DATABASE_ID,
+            start_cursor=start_cursor
+        )
+        events.extend(response['results'])
+        has_more = response['has_more']
+        start_cursor = response['next_cursor']
+    return events
+
 def process_calendar(cal_data):
     cal = Calendar.from_ical(cal_data)
+    ical_events = set()
     for component in cal.walk():
         if component.name == "VEVENT":
+            ical_events.add(component.get('uid'))
             create_or_update_notion_page(component)
+    
+    notion_events = fetch_notion_events()
+    for event in notion_events:
+        notion_uid = event['properties']['UID']['rich_text'][0]['plain_text'] if event['properties']['UID']['rich_text'] else None
+        if notion_uid and notion_uid not in ical_events:
+            delete_notion_page(event['id'])
+
+def delete_notion_page(page_id):
+    try:
+        notion.pages.update(page_id=page_id, archived=True)
+        print(f"Deleted event with ID: {page_id}", flush=True)
+    except APIResponseError as e:
+        print(f"Error deleting Notion page {page_id}: {str(e)}", flush=True)
 
 def create_or_update_notion_page(event):
     print(f"Processing event: {event.get('summary')}", flush=True)
@@ -42,9 +71,9 @@ def create_or_update_notion_page(event):
     query = notion.databases.query(
         database_id=NOTION_DATABASE_ID,
         filter={
-            "property": "Name",
-            "title": {
-                "equals": event.get('summary')
+            "property": "UID",
+            "rich_text": {
+                "equals": str(event.get('uid', ''))
             }
         }
     )
